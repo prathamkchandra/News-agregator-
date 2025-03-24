@@ -1,120 +1,73 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import io from "socket.io-client";
 import "./App.css";
+
+const socket = io("http://localhost:5000");
 
 function App() {
   const [news, setNews] = useState([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("general");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
   const loaderRef = useRef(null);
+
+  // Real-time updates
+  useEffect(() => {
+    socket.on("newsUpdate", (updatedNews) => {
+      setNews(updatedNews.filter(article => article.category === category));
+    });
+
+    return () => socket.off("newsUpdate");
+  }, [category]);
 
   // Fetch news when category changes
   useEffect(() => {
-    setNews([]); // Reset news when category changes
-    setPage(1); // Reset page
-    setHasMore(true);
     fetchNews(1, true);
   }, [category]);
 
-  // Intersection Observer for infinite scrolling
-  useEffect(() => {
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && hasMore && !loading) {
-        fetchNews(page + 1, false);
-      }
-    });
-
-    if (loaderRef.current) observer.observe(loaderRef.current);
-    return () => observer.disconnect();
-  }, [page, hasMore, loading]);
-
   // Fetch news data
-  const fetchNews = async (pageNum, isNewCategory) => {
-    if (loading) return;
-    setLoading(true);
-
+  const fetchNews = async (pageNum, isNewCategory = false) => {
     try {
-      const response = await axios.get(
-        `http://localhost:5000/news?category=${category}`
-      );
-
-      if (response.data.length === 0) {
-        setHasMore(false);
-      } else {
-        setNews((prevNews) =>
-          isNewCategory
-            ? response.data
-            : [...prevNews, ...response.data.slice(0, 10)]
-        );
-        setPage(pageNum);
-      }
+      const response = await axios.get(`http://localhost:5000/news?category=${category}`);
+      setNews(prevNews => (isNewCategory ? response.data : [...prevNews, ...response.data.slice(0, 10)]));
+      setPage(pageNum);
     } catch (error) {
       console.error("Error fetching news:", error);
     }
+  };
 
-    setLoading(false);
+  // Track user interests
+  const trackInterest = async () => {
+    await axios.post("http://localhost:5000/track-interest", { userId: "user123", category });
   };
 
   return (
-    <div className="container">
-      <h1>News Aggregator</h1>
+    <div className={`container ${darkMode ? "dark-mode" : ""}`}>
+      <nav className="floating-navbar">
+        <h1>News Aggregator</h1>
+        <button onClick={() => setDarkMode(!darkMode)} className="dark-mode-toggle">
+          {darkMode ? "☀️ Light Mode" : "🌙 Dark Mode"}
+        </button>
+        <select onChange={(e) => setCategory(e.target.value)} className="category-select">
+          <option value="general">General</option>
+          <option value="tech">Technology</option>
+          <option value="business">Business</option>
+          <option value="gaming">Gaming</option>
+        </select>
+      </nav>
 
-      {/* Search Bar */}
-      <input
-        type="text"
-        placeholder="Search news..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="search-bar"
-      />
-
-      {/* Category Selection */}
-      <select
-        onChange={(e) => setCategory(e.target.value)}
-        className="category-select"
-      >
-        <option value="general">General</option>
-        <option value="world">World News</option>
-        <option value="politics">Politics</option>
-        <option value="gaming">Gaming</option>
-        <option value="tech">Technology</option>
-        <option value="business">Business</option>
-        <option value="sports">Sports</option>
-        <option value="health">Health</option>
-        <option value="science">Science</option>
-        <option value="entertainment">Entertainment</option>
-      </select>
-
-      {/* News List */}
-      {news
-        .filter((article) =>
-          article.title.toLowerCase().includes(search.toLowerCase())
-        )
-        .map((article, index) => (
-          <div key={index} className="news-card">
+      <div className="news-container">
+        {news.map((article, index) => (
+          <div key={index} className="news-card" onClick={trackInterest}>
             <h2>{article.title}</h2>
-            <p>
-              <strong>Source:</strong> {article.source}
-            </p>
-            <p>
-              <strong>Published:</strong>{" "}
-              {new Date(article.pubDate).toLocaleString()}
-            </p>
-            <a href={article.link} target="_blank" rel="noopener noreferrer">
-              Read more
-            </a>
+            <p><strong>Source:</strong> {article.source}</p>
+            <p><strong>Published:</strong> {new Date(article.pubDate).toLocaleString()}</p>
+            <a href={article.link} target="_blank" rel="noopener noreferrer">Read more</a>
           </div>
         ))}
-
-      {/* Infinite Scroll Loader */}
-      {hasMore && (
-        <div ref={loaderRef} className="loading">
-          {loading ? "Loading more news..." : "Scroll down for more"}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
