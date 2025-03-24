@@ -1,47 +1,47 @@
 const express = require("express");
 const cors = require("cors");
 const Parser = require("rss-parser");
-const http = require("http");
-const { Server } = require("socket.io");
 
 const app = express();
 const PORT = 5000;
 app.use(cors());
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" }
-});
-
 const parser = new Parser();
+
+// News sources categorized by topics and regions
 const RSS_FEEDS = {
   general: [
     { name: "BBC", url: "https://feeds.bbci.co.uk/news/rss.xml" },
     { name: "CNN", url: "http://rss.cnn.com/rss/edition.rss" }
   ],
-  tech: [
-    { name: "TechCrunch", url: "https://techcrunch.com/feed/" },
-    { name: "Wired", url: "https://www.wired.com/feed/rss" }
-  ],
-  business: [
-    { name: "Forbes", url: "https://www.forbes.com/business/feed/" },
-    { name: "CNBC", url: "https://www.cnbc.com/id/10001147/device/rss/rss.html" }
-  ],
-  gaming: [
-    { name: "IGN", url: "https://www.ign.com/articles?feed=rss" },
-    { name: "Kotaku", url: "https://kotaku.com/rss" }
-  ],
+  tech: [{ name: "TechCrunch", url: "https://techcrunch.com/feed/" }],
+  business: [{ name: "Forbes", url: "https://www.forbes.com/business/feed/" }],
+  sports: [{ name: "ESPN", url: "https://www.espn.com/espn/rss/news" }],
 };
 
-// Store user interest data for recommendations
-const userInterests = {};
+// Country-based RSS feeds
+const COUNTRY_FEEDS = {
+  us: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+  uk: "https://feeds.bbci.co.uk/news/rss.xml",
+  india: "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+  australia: "https://www.abc.net.au/news/feed/51120/rss.xml",
+  canada: "https://www.cbc.ca/cmlink/rss-topstories",
+};
 
-async function fetchNews(category = "general") {
-  let selectedFeeds = RSS_FEEDS[category] || RSS_FEEDS["general"];
-  let articles = [];
+// Fetch news based on category and region
+app.get("/news", async (req, res) => {
+  try {
+    const category = req.query.category || "general";
+    const region = req.query.region || "us"; // Default to US
+    const searchQuery = req.query.query ? req.query.query.toLowerCase() : "";
 
-  for (const feed of selectedFeeds) {
-    try {
+    let selectedFeeds = RSS_FEEDS[category] || RSS_FEEDS["general"];
+    if (region !== "global" && COUNTRY_FEEDS[region]) {
+      selectedFeeds = [{ name: region.toUpperCase(), url: COUNTRY_FEEDS[region] }];
+    }
+
+    let articles = [];
+    for (const feed of selectedFeeds) {
       const parsedFeed = await parser.parseURL(feed.url);
       articles.push(...parsedFeed.items.map(item => ({
         title: item.title,
@@ -50,39 +50,17 @@ async function fetchNews(category = "general") {
         pubDate: item.pubDate,
         category
       })));
-    } catch (error) {
-      console.error(`Error fetching feed from ${feed.url}:`, error.message);
     }
-  }
 
-  return articles;
-}
+    // Filter articles by search query if provided
+    if (searchQuery) {
+      articles = articles.filter(article => article.title.toLowerCase().includes(searchQuery));
+    }
 
-// API endpoint to fetch news
-app.get("/news", async (req, res) => {
-  try {
-    const category = req.query.category || "general";
-    const articles = await fetchNews(category);
     res.json(articles);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch RSS feeds" });
   }
 });
 
-// WebSocket - Send live news updates
-setInterval(async () => {
-  const articles = await fetchNews();
-  io.emit("newsUpdate", articles);
-}, 30000);
-
-// API for AI-based news recommendations
-app.post("/track-interest", (req, res) => {
-  const { userId, category } = req.body;
-  if (!userInterests[userId]) {
-    userInterests[userId] = {};
-  }
-  userInterests[userId][category] = (userInterests[userId][category] || 0) + 1;
-  res.json({ success: true });
-});
-
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
