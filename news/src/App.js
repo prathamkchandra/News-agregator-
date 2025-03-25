@@ -1,51 +1,62 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import "./App.css";
 
 function App() {
   const [news, setNews] = useState([]);
-  const [search, setSearch] = useState("");
   const [category, setCategory] = useState("general");
-  const [region, setRegion] = useState("us");
+  const [region, setRegion] = useState("global");
   const [page, setPage] = useState(1);
-  const [darkMode, setDarkMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const loaderRef = useRef(null);
 
   // Fetch news when category or region changes
   useEffect(() => {
+    setNews([]); // Reset news on category/region change
+    setPage(1);
+    setHasMore(true);
     fetchNews(1, true);
   }, [category, region]);
 
   // Fetch news data
-  const fetchNews = async (pageNum, isNewCategory = false) => {
+  const fetchNews = useCallback(async (pageNum, isNewCategory = false) => {
+    if (loading || !hasMore) return;
+    setLoading(true);
+
     try {
       const response = await axios.get(`http://localhost:5000/news`, {
-        params: { category, region, query: search },
+        params: { category, region, page: pageNum, limit: 10 },
       });
 
-      setNews(prevNews => (isNewCategory ? response.data : [...prevNews, ...response.data.slice(0, 10)]));
-      setPage(pageNum);
+      if (response.data && response.data.articles) {
+        setNews(prevNews => (isNewCategory ? response.data.articles : [...prevNews, ...response.data.articles]));
+        setHasMore(response.data.hasMore);
+        setPage(response.data.nextPage || pageNum + 1);
+      }
     } catch (error) {
       console.error("Error fetching news:", error);
     }
-  };
+
+    setLoading(false);
+  }, [category, region, loading, hasMore]);
+
+  // Observer for infinite scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loading) {
+        fetchNews(page);
+      }
+    });
+
+    if (loaderRef.current) observer.observe(loaderRef.current);
+    return () => observer.disconnect();
+  }, [fetchNews, hasMore, loading, page]);
 
   return (
-    <div className={`container ${darkMode ? "dark-mode" : ""}`}>
+    <div className="container">
       <nav className="floating-navbar">
         <h1>News Aggregator</h1>
-        <button onClick={() => setDarkMode(!darkMode)} className="dark-mode-toggle">
-          {darkMode ? "☀️ Light Mode" : "🌙 Dark Mode"}
-        </button>
-
-        {/* Search News Input */}
-        <input
-          type="text"
-          placeholder="Search news topics..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="search-bar"
-        />
 
         {/* Category Dropdown */}
         <select onChange={(e) => setCategory(e.target.value)} className="category-select">
@@ -57,6 +68,7 @@ function App() {
 
         {/* Region Dropdown */}
         <select onChange={(e) => setRegion(e.target.value)} className="region-select">
+          <option value="global">All Regions</option>
           <option value="us">USA</option>
           <option value="uk">UK</option>
           <option value="india">India</option>
@@ -75,6 +87,8 @@ function App() {
           </div>
         ))}
       </div>
+
+      {hasMore && <div ref={loaderRef} className="loading">Loading more news...</div>}
     </div>
   );
 }
